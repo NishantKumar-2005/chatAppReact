@@ -1,5 +1,7 @@
 import  { useState, useEffect, useRef } from "react";
 import * as signalR from "@microsoft/signalr";
+import { CSSTransition, TransitionGroup } from "react-transition-group";
+import "./ChatApp.css"; // Import the CSS file for styling
 
 const ChatApp = () => {
   // State variables
@@ -11,6 +13,7 @@ const ChatApp = () => {
   const [status, setStatus] = useState(""); // For status messages
   const [typingUsers, setTypingUsers] = useState([]); // For typing indicators
   const typingTimeoutRef = useRef(null); // To handle typing timeout
+  const messagesEndRef = useRef(null); // To scroll to the latest message
 
   // Initialize SignalR connection when component mounts
   useEffect(() => {
@@ -21,14 +24,24 @@ const ChatApp = () => {
       .build();
 
     // Setup event listener for receiving messages
-    newConnection.on("ReceiveMessage", (user, message) => {
-      setMessages((prevMessages) => [...prevMessages, `${user}: ${message}`]);
+    newConnection.on("ReceiveMessage", (sender, message) => {
+      if (sender !== user) {
+        setMessages((prevMessages) => [
+          ...prevMessages,
+          { sender, message, timestamp: new Date() },
+        ]);
+      } else {
+        setMessages((prevMessages) => [
+          ...prevMessages,
+          { sender: "You", message, timestamp: new Date() },
+        ]);
+      }
       setStatus(""); // Clear any existing status messages
     });
 
     // Setup event listener for typing notifications
     newConnection.on("UserTyping", (typingUser) => {
-      if (typingUser !== user) {
+      if (typingUser !== user && typingUser !== "") {
         setTypingUsers((prevTypingUsers) => {
           if (!prevTypingUsers.includes(typingUser)) {
             return [...prevTypingUsers, typingUser];
@@ -53,7 +66,7 @@ const ChatApp = () => {
       })
       .catch((err) => {
         console.error("Connection failed:", err.toString());
-        setStatus("Connection failed. Please try again later.");
+        setStatus("Join group to start chatting.");
       });
 
     // Cleanup connection when component unmounts
@@ -63,6 +76,13 @@ const ChatApp = () => {
       }
     };
   }, [user]);
+
+  // Scroll to the latest message whenever messages update
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]);
 
   // Handle sending a message to the group
   const sendMessage = async () => {
@@ -76,7 +96,7 @@ const ChatApp = () => {
       return;
     }
 
-    if (!message) {
+    if (!message.trim()) {
       alert("Please enter a message to send.");
       return;
     }
@@ -84,8 +104,8 @@ const ChatApp = () => {
     try {
       await connection.invoke("SendMessageToGroup", groupName, user, message);
       setStatus("Message sent successfully!");
-      setMessages((prevMessages) => [...prevMessages, `You: ${message}`]);
       setMessage(""); // Clear message input after sending
+      // Removed local message appending to prevent duplication
     } catch (err) {
       console.error(err.toString());
       setStatus("Failed to send message. Please try again.");
@@ -132,9 +152,9 @@ const ChatApp = () => {
   // Handle typing event
   const handleTyping = () => {
     if (connection && groupName && user) {
-      connection.invoke("SendTypingNotification", groupName, user).catch((err) =>
-        console.error(err.toString())
-      );
+      connection
+        .invoke("SendTypingNotification", groupName, user)
+        .catch((err) => console.error(err.toString()));
 
       // Clear existing timeout
       if (typingTimeoutRef.current) {
@@ -151,119 +171,94 @@ const ChatApp = () => {
   };
 
   return (
-    <div style={styles.container}>
-      <h1>Group Chat Room</h1>
+    <div className="chat-container">
+      <h1 className="chat-title">🌐 Group Chat Room</h1>
 
       {/* Group actions */}
-      <div style={styles.section}>
+      <div className="group-actions">
         <input
           type="text"
           value={groupName}
           onChange={(e) => setGroupName(e.target.value)}
           placeholder="Enter group name"
-          style={styles.input}
+          className="input-group"
         />
-        <button onClick={joinGroup} style={styles.button}>
+        <button onClick={joinGroup} className="btn join-btn">
           Join Group
         </button>
-        <button onClick={leaveGroup} style={styles.button}>
+        <button onClick={leaveGroup} className="btn leave-btn">
           Leave Group
         </button>
       </div>
 
       {/* User name input */}
-      <div style={styles.section}>
+      <div className="user-name">
         <input
           type="text"
           value={user}
           onChange={(e) => setUser(e.target.value)}
           placeholder="Your name"
-          style={styles.input}
+          className="input-user"
         />
       </div>
 
       {/* Chat message input */}
-      <div style={styles.section}>
+      <div className="message-input">
         <input
           type="text"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyPress={handleTyping}
           placeholder="Your message"
-          style={styles.input}
+          className="input-message"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              sendMessage();
+            }
+          }}
         />
-        <button onClick={sendMessage} style={styles.button}>
-          Send to Group
+        <button onClick={sendMessage} className="btn send-btn">
+          Send 📨
         </button>
       </div>
 
       {/* Status message */}
-      {status && <div style={styles.status}>{status}</div>}
+      {status && <div className="status-message">{status}</div>}
 
       {/* Typing indicators */}
       {typingUsers.length > 0 && (
-        <div style={styles.typing}>
-          {typingUsers.join(", ")} {typingUsers.length === 1 ? "is" : "are"} typing...
+        <div className="typing-indicator">
+          {typingUsers.join(", ")} {typingUsers.length === 1 ? "is" : "are"}{" "}
+          typing...
         </div>
       )}
 
       {/* Message display area */}
-      <ul style={styles.messageList}>
-        {messages.map((msg, index) => (
-          <li key={index} style={styles.messageItem}>
-            {msg}
-          </li>
-        ))}
-      </ul>
+      <div className="messages-list">
+        <TransitionGroup>
+          {messages.map((msg, index) => (
+            <CSSTransition key={index} timeout={300} classNames="message">
+              <div
+                className={`message-item ${
+                  msg.sender === "You" ? "message-sent" : "message-received"
+                }`}
+              >
+                <span className="message-sender">{msg.sender}</span>
+                <span className="message-content">{msg.message}</span>
+                <span className="message-time">
+                  {msg.timestamp.toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+            </CSSTransition>
+          ))}
+        </TransitionGroup>
+        <div ref={messagesEndRef} />
+      </div>
     </div>
   );
-};
-
-// Inline styles for better presentation
-const styles = {
-  container: {
-    maxWidth: "600px",
-    margin: "0 auto",
-    padding: "20px",
-    fontFamily: "Arial, sans-serif",
-  },
-  section: {
-    marginBottom: "15px",
-    display: "flex",
-    gap: "10px",
-  },
-  input: {
-    flex: "1",
-    padding: "8px",
-    fontSize: "16px",
-  },
-  button: {
-    padding: "8px 12px",
-    fontSize: "16px",
-    cursor: "pointer",
-  },
-  status: {
-    marginBottom: "10px",
-    padding: "10px",
-    backgroundColor: "#f0f0f0",
-    borderRadius: "5px",
-  },
-  typing: {
-    marginBottom: "10px",
-    fontStyle: "italic",
-    color: "#555",
-  },
-  messageList: {
-    listStyleType: "none",
-    padding: "0",
-    maxHeight: "300px",
-    overflowY: "auto",
-    border: "1px solid #ccc",
-    borderRadius: "5px",
-  },
-  messageItem: {
-    marginBottom: "5px",
-  },
 };
 
 export default ChatApp;
